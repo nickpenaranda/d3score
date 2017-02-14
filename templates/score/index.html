@@ -1,0 +1,450 @@
+{% load staticfiles %}
+<html>
+<head>
+    <title>d3score.com | Find your Diablo 3 Score!</title>
+    <!-- SCRIPTS -->
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+    <script src="http://malsup.github.com/min/jquery.form.min.js"></script>
+    <script src="http://us.battle.net/d3/static/js/tooltips.js"></script>
+    <script>
+        var prettyNames = {
+            'barbarian':'Barbarian',
+            'crusader':'Crusader',
+            'demon-hunter':'Demon Hunter',
+            'monk':'Monk',
+            'witch-doctor':'Witch Doctor',
+            'wizard':'Wizard',
+        };
+        var profileUpdateTimer;
+        var pName, pNumber, profile, heroID, hero;
+
+        // String.format utility function
+        if (!String.format) {
+            String.format = function(format) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                return format.replace(/{(\d+)}/g, function(match, number) { 
+                    return typeof args[number] != 'undefined'
+                        ? args[number] 
+                        : match;
+                });
+            };
+        }        
+
+        $(document).ready(function() {
+            pName = $('#profileName').val().toLowerCase();
+            pNumber = $('#profileNumber').val();
+            {% if hero_id %}
+            heroID = {{ hero_id }};
+            {% endif %}
+
+            // Auto submit for profile information
+            $('#profileForm').ajaxForm({
+                type: 'GET',
+                dataType: 'json',
+            });
+            $('#profileForm').keyup(function() {
+                var newName = $('#profileName').val();
+                var newNumber = $('#profileNumber').val();
+
+                if(newName == pName && newNumber == pNumber) {
+                    return;
+                }
+
+                clearTimeout(profileUpdateTimer);
+                profileUpdateTimer = setTimeout(getProfile, 1000);
+            });
+
+            if(pName && pNumber) {
+                getProfile();
+                if(heroID) {
+                    getHero();
+                }
+            }
+
+            $('#heroSelect').change(function() {
+                heroID = $('#heroSelect').val();
+                if(isNaN(heroID)) {
+                    return;
+                }
+                getHero();
+            })
+
+            $('#info').hide();
+            $('div.HeroInfo').click(function() {
+                $('#info').slideToggle();
+            });
+            //$('.HeroInfo').hide();
+        });
+
+        function getProfile() {
+            pName = $('#profileName').val();
+            pNumber = $('#profileNumber').val();
+
+            if(pName.length && pNumber.length && !isNaN(pNumber)) {
+                $('#profileForm input').removeClass("error");
+                $('#profileForm').ajaxSubmit(function(response) {
+                    profile = JSON.parse(response);
+                    updateHeroes();
+                });
+            } else {
+                $('#profileForm input').addClass("error");
+            }
+
+        }
+
+        function getHero() {
+            var opts = {
+                url: '/h',
+                data: {'name':pName,'number':pNumber,'hero_id':heroID},
+                type: 'GET',
+                success: updateScore,
+            };
+            $('#score').slideUp();
+            $('#gettingHero').fadeIn();
+            $.ajax(opts);
+        }
+
+        function updateHeroes() {
+            $('#heroMessage').slideUp();
+            $('#heroSelect').empty();
+            if(!profile['heroes'] || profile['heroes'].length < 1) { // Error
+                $('#profileForm input').addClass('error');
+                $('#heroMessage').text("Couldn't find any heroes for that battletag :(").slideDown();
+            }
+
+            $('#heroSelect').append(
+                $('<option>').attr('value','__NOBODY__').text('Click me!'));
+
+            $.each(profile['heroes'], function(i,hero) {
+                $('#heroSelect').append(
+                    $('<option>')
+                        .attr('value',hero['id'])
+                        .text(hero['name'] + ' (' + hero['level'] + ' ' + prettyNames[hero.class] + ')'));
+            });
+
+            if(heroID) {
+                $('#heroSelect').val(heroID);
+            }
+        }
+
+        function updateScore(response) {
+            hero = JSON.parse(response);
+
+            $('#gettingHero').fadeOut();
+            // Update direct link
+            var link = 'http://d3score.com/' + pName + '-' + pNumber + '/' + heroID + '/';
+            $('#linkText').attr('href', link).text(link);
+            $('div.DirectLinkInfo').slideDown();
+
+            // Character level, class and name in info header
+            $('#scoreWho').text(
+                'Level ' + hero.level + ' ' + prettyNames[hero.class] + ' ' + hero.name
+                );
+            $('#damage').text(
+                hero._damage_score.toFixed(0)
+            );
+
+            $('#survivability').text(
+                hero._surv_score.toFixed(0)
+            );
+
+            // Stats listing    
+            $('#infoStats').empty();
+            hero['gearStats']['strength'] = hero['stats']['strength']
+            hero['gearStats']['dexterity'] = hero['stats']['dexterity']
+            hero['gearStats']['intelligence'] = hero['stats']['intelligence']
+            hero['gearStats']['vitality'] = hero['stats']['vitality']
+            $.each(hero['gearStats'], function(stat,val) {
+                $('#infoStats').append(
+                    $('<li>').append(formatStat(stat,val)));
+            });
+
+            // Display populated elements
+            $('#score').slideDown();
+
+            $('#scoreMessage').slideUp();
+        }
+
+        var statFormats = {
+            'arcaneBonus':{
+                'fmt':'Arcane skill damage increased by {0}%',
+                'precision':0},
+            'coldBonus':{
+                'fmt':'Cold skill damage increased by {0}%',
+                'precision':0},
+            'fireBonus':{
+                'fmt':'Fire skill damage increased by {0}%',
+                'precision':0},
+            'holyBonus':{
+                'fmt':'Holy skill damage increased by {0}%',
+                'precision':0},
+            'physicalBonus':{
+                'fmt':'Physical skill damage increased by {0}%',
+                'precision':0},
+            'poisonBonus':{
+                'fmt':'Poison skill damage increased by {0}%',
+                'precision':0},
+            'eliteBonus':{
+                'fmt':'Damage vs. Elites increased by {0}%',
+                'precision':0}, 
+            'strength':{
+                'fmt':'Strength increased by {0}',
+                'precision':0},
+            'dexterity':{
+                'fmt':'Dexterity increased by {0}',
+                'precision':0},
+            'intelligence':{
+                'fmt':'Intelligence increased by {0}',
+                'precision':0},
+            'vitality':{
+                'fmt':'Vitality increased by {0}',
+                'precision':0},
+            'armor':{
+                'fmt':'Armor increased by {0}',
+                'precision':0},
+            'critChance':{
+                'fmt':'Critical hit chance increased by {0}%',
+                'precision':2},
+            'critDamage':{
+                'fmt':'Critical hit damage increased by {0}%',
+                'precision':0},
+            'moveSpeed':{
+                'fmt':'Movement speed increased by {0}%',
+                'precision':0},
+            'attackSpeed':{
+                'fmt':'Attack speed increased by {0}%',
+                'precision':0}
+        };
+
+        function formatStat(stat,val) {
+            return String.format(statFormats[stat]['fmt'],val.toFixed(statFormats[stat]['precision']));    }
+
+    </script>
+
+    <!-- STYLE -->
+    <style type="text/css">
+        #profileForm .error {
+            background-color: #FDD;
+        }
+
+        a {
+            color: #ffd195;
+            font-weight: lighter;
+        }
+
+        body {
+            background: url({% static "dark_wall.png" %});
+            color: #f2973b;
+            font-family: sans-serif;
+            font-weight: lighter;
+        }
+
+        p {
+            padding: 20px;
+        }
+
+        em {
+            color: #ffd195;
+        }
+
+        div.content {
+            background: url({% static "extra_clean_paper.png" %});
+            width: 600px;
+            padding: 5px;
+            margin-left: auto;
+            margin-right: auto;
+            border-radius: 10px;
+            border: solid 1px #444;
+        }
+
+        input {
+            border: 1px #555;
+            border-radius: 5px;
+            font-size: 18px;
+            padding: 5px;
+            margin: 5px;
+            text-align: center;
+        }
+
+        h1, h2, h3 {
+            font-weight: inherit;
+        }
+
+        input#profileName {
+            width: 200px
+        }
+
+        input#profileNumber {
+            width: 70px
+        }
+
+        select {
+            background: #fff;
+            width: 268px;
+            padding: 5px;
+            font-size: 16px;
+            line-height: 1;
+            border: 1px #555;
+            border-radius: 5px;
+            height: 30px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        div.ScoreOutput, div.DirectLinkInfo, div.ProfileSelect, div.HeroSelect, div.HeroInfo {
+            padding: 10px;
+            width: 450px;
+            margin-top: 10px;
+            margin-left: auto;
+            margin-right: auto;
+            background-color: #000;
+            border-radius: 10px;
+            border: solid 1px #444;
+            text-align: center;
+        }
+
+        div#score {
+            width: 390px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .clear {
+            clear: both;
+        }
+
+        span.damage, span.sep, span.survivability {
+            float: left;
+            font-size: 42px;
+            font-family: monospace;
+        }
+
+        span.damage {
+            width: 180px;
+            color: #fffc11;
+        }
+
+        span.survivability {
+            width: 180px;
+            color: #3472ff;
+        }
+
+        span.desc {
+            font-size: 36px;
+        }
+
+        div#gettingHero {
+            position: absolute;
+            top: 400px;
+            width: 400px;
+            left: 0;
+            right: 0;
+            margin-left: auto;
+            margin-right: auto;
+            background-color: #5c0000;
+            text-align: center;
+            color: #FFF;
+            border-radius: 10px;
+            border: solid 1px #888;
+        }
+
+        div.HeroInfo {
+            text-align: left;
+            margin-bottom: 5px;
+        }
+
+        div.HeroInfo:hover {
+            background-color: #222;
+        }
+
+        div.HeroInfo h3 {
+            text-align: center;
+        }
+
+        div#footer {
+            text-align: center;
+            font-size: 10px;
+            color: #555;
+        }
+
+    </style>
+</head>
+<body>
+<div class="content">
+    <div class="Header">
+        <img src="{% static "score/d3.png" %}" style="float:left" />
+        <p>
+        <em>d3score</em> provides a standard, simple way to valuate a character's gear.
+        There are two scores, <em>DAMAGE</em> and <em>SURVIVAL</em>, that are calculated
+        from a character's <em>unbuffed</em> and <em>unskilled</em> stats wearing the gear he
+        or she has according to the Diablo 3 community site.
+        </p>
+    </div>
+    <div class="ProfileSelect">
+        <form id="profileForm" action="/p" method="GET">
+            <h3>Battletag (US only)</h3>
+            <input type="text" id="profileName" name="name"
+            {% if name %}value="{{ name }}"{% endif %} placeholder="Modustollens">-<input type="text" id="profileNumber" name="number"
+            {% if number %}value="{{ number }}"{% endif %} placeholder="1148"><br>&nbsp;
+        </form>
+    </div>
+
+    <div class="HeroSelect">
+        <h3>Select Hero:</h3>
+        <select name="hero" id="heroSelect">
+        </select><br>&nbsp;
+    </div>
+
+    <div class="ScoreOutput">
+        <div id="score" style="display:none">
+            <h3 id="scoreWho"></h3>
+            <span class="damage" id="damage"></span>
+            <span class="sep">/</span>
+            <span class="survivability" id="survivability"></span><br>
+            <div class="clear"></div>
+            <span class="damage desc">DAMAGE</span>
+            <span class="sep desc">&nbsp</span>
+            <span class="survivability desc">SURVIVAL</span>
+        </div>
+        <div class="clear"></div>
+    </div>
+    <div class="DirectLinkInfo" style="display:none">
+        <h3>Share Link</h3>
+        <h4><a id="linkText"></a></h4>
+    </div>
+    <div class="HeroInfo">
+        <h3>Details</h3>
+        <div id="info" style="display:none">
+            <h4>Gear Stats</h4>
+            <ul id="infoStats">
+            </ul>
+            <h4>Explanation</h4>
+            <p>d3scores are calculated using the following formulae:</p>
+            <pre>
+    baseDamage    = mhDPS + ohDPS
+
+    nonCritDamage = baseDamage
+                    * (1 + eliteBonusDamage)
+                    * (primaryClassStat / 100)
+                    * (1 + max(elementalBonusDamage))
+
+    critDamage    = nonCritDamage
+                    * (.05 + critChance)
+                    * (.5 + critDamage)
+
+    totalDamage = nonCritDamage + critDamage
+
+    survivability = &lt;WIP&gt;
+            </pre>
+        </div>
+    </div>
+    <div id="gettingHero" style="display:none">
+        <h3>Grabbing info (this might take a second...)</h3>
+    </div>
+</div>
+<div id="footer">
+    (c) 2014 Nick Penaranda.  Diablo 3 is a registered trademark of Blizzard Entertainment, Inc.  This is a personal, non-profit site.  Why are you reading this, anyway?
+</div>
+</body>
+
+</html>
